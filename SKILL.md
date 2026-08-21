@@ -102,12 +102,14 @@ python3 -m harmonyos_sign oauth-login --timeout 300   # 生成 URL，等待回�
    - 页面是登录表单 → 提示用户完成登录（或截图给用户扫码）；登录后页面会回到授权页，
      再点击「允许」
 3. 回调到达 → `oauth-login` 自动续兑 oauth2Token，流程结束。
-4. 没有浏览器自动化工具时（或全部失败）：若机器上有浏览器（chrome/chromium/firefox/safari 等），
+4. **鉴权完成 → 立即关闭并清理本次打开的浏览器标签**（WebBridge `close_session` / MCP
+   `Tab.close` 等），不留登录/授权页残留——授权页含敏感会话状态，且不应弄乱用户浏览器。
+5. 没有浏览器自动化工具时（或全部失败）：若机器上有浏览器（chrome/chromium/firefox/safari 等），
    直接用系统方式打开授权 URL 并提示用户操作——如 `xdg-open <url>`、`google-chrome <url>`、
    `sensible-browser <url>`（Windows 用 `start <url>`，macOS 用 `open <url>`）；
    让用户在弹出的浏览器窗口里登录/点击「允许」。
-5. 连浏览器都没有或打不开时，才把 URL 文本交给用户手动打开。
-6. 超时（默认 5min）→ 脚本停止并提示；agent 提醒用户检查/重试。
+6. 连浏览器都没有或打不开时，才把 URL 文本交给用户手动打开。
+7. 超时（默认 5min）→ 脚本停止并提示；agent 提醒用户检查/重试。
 
 > 环境注意：回调服务器默认监听 `0.0.0.0:18487`（容器/QEMU 端口转发场景转发目标是 guest IP，
 > 仅回环监听收不到回调）；输出带 flush，重定向到日志文件也能实时看到进度。
