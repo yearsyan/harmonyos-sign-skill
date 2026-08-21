@@ -1,6 +1,6 @@
 ---
 name: harmonyos-signing
-description: HarmonyOS 应用签名与真机安装全流程。提供命令行工具链（hdc/ohpm/hvigorw）环境检查、DevEco 客户端 OAuth 登录模拟（获取 oauth2Token）、云端签发证书与调试 Profile、本地 HAP 签名、hdc 安装与启动验证的完整 Python 方法。浏览器授权由 agent 自主选择工具完成（WebBridge/Chrome DevTools MCP/Playwright 等；未登录则提示用户），脚本只生成授权 URL 并等待回调。当用户需要对 HarmonyOS HAP 签名、安装应用到 HarmonyOS 真机、复刻 DevEco 自动签名、处理证书/Profile/UDID、排查 hdc 连接或签名校验失败时使用。
+description: HarmonyOS 应用签名与真机安装全流程。提供命令行工具链（hdc/ohpm/hvigorw）环境检查、DevEco 客户端 OAuth 登录模拟（获取 oauth2Token）、云端签发证书与调试 Profile、本地 HAP 签名、hdc 安装与启动验证的完整 Python 方法。浏览器授权由 agent 自主完成（用其可用的任意浏览器自动化能力，如 WebBridge/CDP/Playwright/browser-use；未登录则提示用户），脚本只生成授权 URL 并等待回调。当用户需要对 HarmonyOS HAP 签名、安装应用到 HarmonyOS 真机、复刻 DevEco 自动签名、处理证书/Profile/UDID、排查 hdc 连接或签名校验失败时使用。
 license: MIT
 metadata:
   harmonyos: "6.0.1+ (API 21-24)"
@@ -57,7 +57,7 @@ python3 -m harmonyos_sign fetch-udid         # 读取已连接真机 UDID
 # 1. 构建 unsigned HAP
 hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
 
-# 2. 登录取 oauth2Token（自动探测浏览器后端；未登录会提示用户完成登录）
+# 2. 登录取 oauth2Token（浏览器授权由 agent 完成，见下节）
 python3 -m harmonyos_sign oauth-login       # -> ~/.ohos-oauth/oauth2token.txt
 
 # 3. 一键签名+安装：certId/deviceId 全部可省略（自动签发证书/匹配设备/注册设备）
@@ -84,17 +84,23 @@ hdc shell aa start -a EntryAbility -b <bundleName>
 python3 -m harmonyos_sign oauth-login --timeout 300   # 生成 URL，等待回调（默认 5min）
 ```
 
-脚本输出授权 URL 后，**agent 必须主动完成浏览器授权**（不是等待用户）：
+脚本输出授权 URL 后，**由 agent 自主完成浏览器授权**（不是等待用户）。浏览器自动化能力
+因 agent 而异（Kimi WebBridge / Chrome DevTools MCP / Playwright / 内置 browser use /
+浏览器扩展 CDP 等），**本 skill 不绑定也不要求具体工具**——按目标操作即可，用你当前
+环境可用的任意浏览器能力：
 
-1. **先探测 WebBridge**：`curl -s -m 2 http://127.0.0.1:10086/command -H 'Content-Type: application/json' -d '{"action":"list_tabs","session":"probe"}'`
-   返回 `{"ok":true,...}` 即可用（浏览器为宿主的真实浏览器，保留用户登录态）。
-   也探测 .kimi-webbridge/bin 的 CLI、playwright 等，谁可用用谁。
-2. **打开授权 URL**（WebBridge `navigate`，`session` 参数命名为任务名）→ 检查页面：
-   - 出现「允许」按钮（快照找 `button: 允许`）→ 点击它，完成授权
-   - 登录表单 → **提示用户完成登录**（或截图给用户扫码），登录后自动回授权页 → 点击「允许」
-3. 回调到达 → 脚本自动继续兑换 oauth2Token
-4. 仅当所有浏览器工具都不可用时才提示用户手动打开 URL。
-5. 超时（默认 5min）→ 脚本停止并提示；agent 提醒用户检查/重试
+1. **导航**：用你的浏览器能力打开授权 URL（新标签页）。
+2. **检查页面**：
+   - 页面出现「允许」按钮 → 点击它（授权完成，等待脚本收到回调）
+   - 页面是登录表单 → 提示用户完成登录（或截图给用户扫码）；登录后页面会回到授权页，
+     再点击「允许」
+3. 回调到达 → `oauth-login` 自动续兑 oauth2Token，流程结束。
+4. 没有浏览器自动化工具时（或全部失败）：若机器上有浏览器（chrome/chromium/firefox/safari 等），
+   直接用系统方式打开授权 URL 并提示用户操作——如 `xdg-open <url>`、`google-chrome <url>`、
+   `sensible-browser <url>`（Windows 用 `start <url>`，macOS 用 `open <url>`）；
+   让用户在弹出的浏览器窗口里登录/点击「允许」。
+5. 连浏览器都没有或打不开时，才把 URL 文本交给用户手动打开。
+6. 超时（默认 5min）→ 脚本停止并提示；agent 提醒用户检查/重试。
 
 > 环境注意：回调服务器默认监听 `0.0.0.0:18487`（容器/QEMU 端口转发场景转发目标是 guest IP，
 > 仅回环监听收不到回调）；输出带 flush，重定向到日志文件也能实时看到进度。

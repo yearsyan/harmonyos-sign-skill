@@ -97,10 +97,10 @@ Profile: provision/add 创建响应直接返回 provisionFileUrl（OBS 预签名
    → {status:true, userInfo:{accessToken, refreshToken, userId, nationalCode, realName}}
 ⑤ accessToken 即 oauth2Token，供 3a 使用（有效期约 1 小时，重跑 oauth-login 刷新）
 ```
-脚本: `python3 -m harmonyos_sign oauth-login`（内嵌回调服务器，双监听 127.0.0.1+::1）
-脚本**只生成授权 URL + 等待回调**；浏览器操作由 agent 自主选择工具完成
-（Kimi WebBridge / Chrome DevTools MCP / playwright CLI 等），
-打开 URL → 检查登录（「允许」按钮=已登录，登录表单=提示用户）→ 点击允许；
+脚本: `python3 -m harmonyos_sign oauth-login`（内嵌回调服务器，监听 0.0.0.0+::1）
+脚本**只生成授权 URL + 等待回调**；浏览器操作由 agent 用其可用的任意浏览器自动化能力完成：
+打开 URL → 检查页面（「允许」按钮=已登录，登录表单=提示用户）→ 点击允许；
+无自动化工具时可直接 `xdg-open`/`google-chrome <url>` 等拉起本机浏览器让用户操作；
 回调到达后脚本自动继续兑换；默认 5min 超时则停止并提示用户。
 注意: 未实名账号同样可用（实测 realName=false 成功安装）✓
 回调注意: 服务器对 favicon.ico 等 GET 请求不得覆盖已收到的 tempToken（已修复）

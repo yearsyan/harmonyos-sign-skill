@@ -4,7 +4,7 @@ HarmonyOS 应用签名与真机安装工具链（Python，零第三方依赖）�
 
 在无 DevEco（Linux 无官方版）环境下，通过模拟 DevEco 客户端 OAuth 登录，完成
 **云端签发证书/调试 Profile → 本地 HAP 签名 → hdc 安装真机**的完整闭环。
-浏览器授权由 agent 自主选择工具完成（Kimi WebBridge / Chrome DevTools MCP / Playwright 等），
+浏览器授权由 agent 自主完成（用其可用的任意浏览器自动化能力），
 脚本只负责生成授权 URL 与等待回调。未实名华为账号同样可用。
 
 > 命名说明：HarmonyOS 5.0 起官方统一称 **HarmonyOS**（早期版本曾称 HarmonyOS NEXT）。
