@@ -97,12 +97,13 @@ def token_dir() -> Path:
     except OSError:
         pass
     # 一次性迁移：旧位置（~/.ohos-oauth）若仍有 token 且新位置没有，搬过去
+    # ★ 用 shutil.move：/run/user (tmpfs) 与 /root 跨文件系统，rename 会 EXDEV
     for name in ("oauth2token.txt", "jwt.txt", "uid.txt"):
         old = Path(os.environ.get("OHOS_OAUTH", "~/.ohos-oauth")).expanduser() / name
         if old.exists() and not (p / name).exists() and not override:
             try:
-                old.rename(p / name)
-            except OSError:
+                shutil.move(str(old), str(p / name))
+            except Exception:  # noqa: BLE001
                 pass
     return p
 
