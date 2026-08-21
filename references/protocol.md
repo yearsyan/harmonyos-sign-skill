@@ -23,8 +23,11 @@ reapply换取OBS预签名URL → 下载.cer(三证书链) →
 ```
 POST /cps/provision-manage/v1/ide/test/provision/add   创建调试Profile ★
 POST /cps/harmony-cert-manage/v1/cert/add              上传CSR签证书 ★ ({csr,certName,certType:"1"})
-POST /cps/harmony-cert-manage/v1/cert/list             查证书
-POST /cps/harmony-cert-manage/v1/cert/delete           删证书
+POST /cps/harmony-cert-manage/v1/cert/list             查证书（含 publicKeySha256 配对指纹）
+DELETE /cps/harmony-cert-manage/v1/cert/delete ★ 删证书
+                                                       ★ 方法必须是 DELETE（POST 会 404）
+                                                       ★ body 参数名 certIds: {"certIds":["<id>"]}
+                                                       （certId/ids/idList 均回 invalid parameters）
 GET  /cps/device-manage/v1/device/list?encodeFlag=0&start=1&pageSize=100   查设备 (返回 list)
 POST /cps/device-manage/v1/device/add                  注册设备 ({deviceName,udid,deviceType})
 POST /cps/provision-manage/v1/provision/list           查Profile（IDE通道）
@@ -38,6 +41,14 @@ POST /amis/app-manage/v1/objects/url/reapply           ★ 换取OBS预签名下
 
 ⚠️ 端点易错点（2026-08-21 实测）：
 - 签证书是 `/cert/add`，**不是** `/cert`（后者 404 且响应体为空）
+- 删证书是 `/cert/delete` + **DELETE 方法**（POST 会 404）；参数名必须是 `certIds` 数组
+  （certId/ids/idList 回 `[AppGalleryConnectProvisionService]invalid parameters`）；
+  证书列表响应 `allowDel` 字段标记允许删除（本工具签发的 cli_debug_* 证书为 1）
+- 非实名账号证书配额：实测 **3 张/账号**，占满后 cert/add 报配额错误；
+  需先删旧证书（cert-delete 命令或本工具自动清理）再签发
+- 证书配对指纹：cert/list 响应 `publicKeySha256`（冒号分隔 hex）与本地 p12 公钥
+  同口径 = SHA256(base64(SPKI 中 BIT STRING 裸公钥点)) 的小写 hex；
+  工具会用它自动校验/匹配/清理，避免换机器后签名报 keyAlias 不配对
 - 证书/Profile 文件下载不在 cert-manage 域内，走 `/amis/app-manage/v1/objects/url/reapply`；
   把 `certObjectId`（cert/list 返回）或 OBS `provisionFileUrl`（provision/add 返回）作为
   `sourceUrls` 传入即可换预签名 URL（此端点从 DevEco Studio 的 hos-project-mgmt 插件
@@ -137,6 +148,9 @@ generate-csr:
 |------|------|------|
 | connect-api 401 | token 无效/过期 | 重跑 oauth-login（token 约 1h 有效） |
 | `/cert` 404（空响应体） | 端点错误 | 签证书必须用 `/cert/add` |
+| `cert/delete` 404 | 用了 POST | ★ 必须 **DELETE** 方法 |
+| `cert/delete` invalid parameters | 参数名错 | body 必须是 `{"certIds":[...]}`（certId/ids 均报错） |
+| 证书配额满（签发报错） | 非实名上限 3 张 | `cert-delete` 删旧证书（工具自动清理不配对旧证书后可重签） |
 | provision 403 (网页通道) | 网页 CSRF 认证被 gate | 必须用 oauth2Token 通道(3a) |
 | provision "cert not exist" | certId 不存在/不属于该账号 | 用 `certs` 命令核对 id（19位数字，勿手抄错位） |
 | 证书下载 404 | 走了错误端点 | 用 `/amis/app-manage/v1/objects/url/reapply`，sourceUrls=certObjectId |
@@ -147,4 +161,3 @@ generate-csr:
 | Accept not supported | Accept 头不对 | 必须 `Accept: */*` |
 | jwtToken 兑换失败 | 缺参数/头 | tempToken+site=CN+version+appid=1007 |
 | 回调超时 | 端口占用 / favicon 覆盖 tempToken | 端口空闲 + 新版 handler 已修复 |
-| 本地 p12 与云证书不配对 | p12 被重新生成/换机器 | 删 work/cert-id.txt 后重跑 new-cert 重签证书 |

@@ -11,8 +11,11 @@ CONNECT = "https://connect-api.cloud.huawei.com"
 OBS = None  # 由 provisionFileUrl 动态获取
 
 # 端点速查（★ 实测正确的路径，注意部分端点必须带 /add 等后缀）：
-#   签发证书    POST /api/cps/harmony-cert-manage/v1/cert/add   body={csr,certName,certType:"1"}
-#   下载URL     POST /api/amis/app-manage/v1/objects/url/reapply body={sourceUrls:"<objectId|OBS url>"}
+#   签发证书    POST   /api/cps/harmony-cert-manage/v1/cert/add   body={csr,certName,certType:"1"}
+#   删除证书    DELETE /api/cps/harmony-cert-manage/v1/cert/delete body={certIds:[...]}
+#               ★ 必须是 DELETE 方法（POST 会 404）；参数名 certIds（certId/ids 会报参数错误）
+#   证书列表    POST   /api/cps/harmony-cert-manage/v1/cert/list   含 publicKeySha256（配对校验用）
+#   下载URL     POST   /api/amis/app-manage/v1/objects/url/reapply body={sourceUrls:"<objectId|OBS url>"}
 #               -> {urlsInfo:[{sourceUrl,newUrl,sha256}]}（OBS 预签名，300s 有效）
 #   其余端点见 references/protocol.md
 
@@ -34,6 +37,55 @@ def _connect_get(path: str, query: dict, token: str, uid: str) -> dict:
 def query_certs(token: str, uid: str) -> list[dict]:
     r = _connect_api("/api/cps/harmony-cert-manage/v1/cert/list", {}, token, uid)
     return r.get("certList", [])
+
+
+def delete_certs(token: str, uid: str, cert_ids: list[str]) -> dict:
+    """删除云端调试证书。★ DELETE 方法 + body 参数名 certIds（实测，2026-08）。
+    POST 会 404；certId/ids/idList 等参数名会回 invalid parameters。
+    非实名账号有证书配额（实测 3 张/账号），删除旧证书后才能签发新的。"""
+    return _connect_api("/api/cps/harmony-cert-manage/v1/cert/delete",
+                        {"certIds": [str(i) for i in cert_ids]}, token, uid, method="DELETE")
+
+
+def cert_pubkey_fp(cert: dict) -> str:
+    """归一化云端 publicKeySha256（形如 AA:BB:...）-> 小写 hex"""
+    return str(cert.get("publicKeySha256") or "").replace(":", "").lower()
+
+
+def p12_public_key_sha256(p12: Path, alias: str = "online-app",
+                          pwd: str = KEYSTORE_PASS) -> str:
+    """计算本地 p12 公钥指纹，与云端 cert/list.publicKeySha256 同口径：
+    SHA256(base64(SPKI 中裸公钥点)) 的小写 hex。失败返回空串。
+    用于校验本地 p12 与云端证书是否同一密钥对（换 p12/跨机迁移时避免签名报 keyAlias）。
+    """
+    import base64
+    import hashlib
+    try:
+        kt = subprocess.run(["keytool", "-exportcert", "-keystore", str(p12),
+                             "-alias", alias, "-storepass", pwd, "-rfc"],
+                            capture_output=True, text=True, timeout=30)
+        if kt.returncode != 0:
+            return ""
+        pub = subprocess.run(["openssl", "x509", "-pubkey", "-noout"],
+                             input=kt.stdout, capture_output=True, text=True, timeout=30)
+        if pub.returncode != 0:
+            return ""
+        der = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"],
+                             input=pub.stdout, capture_output=True, timeout=30)
+        if der.returncode != 0:
+            return ""
+        # 剥 SPKI BIT STRING，取裸公钥点（去掉 unused-bits 计数字节）
+        i = der.stdout.index(b"\x03")
+        j = der.stdout[i + 1]
+        if j & 0x80:
+            n = j & 0x7f
+            j = int.from_bytes(der.stdout[i + 2:i + 2 + n], "big")
+            point = der.stdout[i + 2 + n:i + 2 + n + j]
+        else:
+            point = der.stdout[i + 2:i + 2 + j]
+        return hashlib.sha256(base64.b64encode(point[1:])).hexdigest()
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def query_devices(token: str, uid: str) -> list[dict]:
@@ -165,8 +217,11 @@ def ensure_cert(token: str, uid: str, cert_id: str | None,
                 cert_cer: Path | None, key_p12: Path | None) -> tuple[str, Path, Path]:
     """确保证书材料就绪。返回 (certId, cloud.cer, online-app.p12)。
 
-    优先级：显式 certId > work/cert-id.txt（本工具签发时缓存）> 云端同名证书
-    （cli_debug_<uid>.cer）> 重新签发。p12 缺失时自动生成（注意：换 p12 必须重签证书）。
+    优先级：显式 certId > work/cert-id.txt（校验配对）> 云端指纹匹配 > 自动清理旧证书后重签。
+    配对校验：本地 p12 公钥指纹 vs 云端 publicKeySha256（同口径 SHA256(base64(裸公钥点))）。
+    不配对场景（换机器/删了 p12/缓存过期）自动处理：
+      - 删除云端不配对的本工具证书（cli_debug_<uid>.cer，占配额且无法使用）
+      - 签发失败（通常是非实名证书配额满，实测 3 张/账号）时清理可删证书后重试一次
     """
     od = oauth_dir()
     work = od / "work"
@@ -175,6 +230,10 @@ def ensure_cert(token: str, uid: str, cert_id: str | None,
     cer = Path(cert_cer) if cert_cer else work / "cloud.cer"
     cert_id_file = work / "cert-id.txt"
     my_name = f"cli_debug_{uid}.cer"
+
+    def _fp_match(c: dict) -> bool:
+        fp = cert_pubkey_fp(c)
+        return bool(local_fp and fp and fp == local_fp)
 
     if cert_id:  # 显式指定，证书文件必须同时存在
         if not cer.exists():
@@ -188,28 +247,71 @@ def ensure_cert(token: str, uid: str, cert_id: str | None,
         print("   ⚙️ 生成密钥对 (ECC NIST-P-384) -> online-app.p12")
         gen_keypair(p12)
 
-    # 1) 本工具缓存的 certId（且证书文件还在）
+    local_fp = p12_public_key_sha256(p12)
+    if local_fp:
+        print(f"   🔑 本地 p12 公钥指纹: {local_fp[:20]}...")
+
+    def _cleanup_stale(certs: list[dict], reason: str) -> int:
+        """删除不配对的本工具(cli_debug_*)旧证书，返回删除数量"""
+        stale = [c for c in certs
+                 if c.get("certName") == my_name and not _fp_match(c)
+                 and c.get("allowDel", 1)]
+        if not stale:
+            return 0
+        ids = [str(c["id"]) for c in stale]
+        print(f"   🧹 {reason}: 删除不配对旧证书 {ids}")
+        r = delete_certs(token, uid, ids)
+        if r.get("ret", {}).get("code") != 0:
+            print(f"   ⚠️ 删除失败: {json.dumps(r, ensure_ascii=False)[:200]}")
+            return 0
+        return len(stale)
+
+    # 1) 本工具缓存的 certId（需通过配对校验；不配对视为无效缓存）
     if cert_id_file.exists():
         cached = cert_id_file.read_text().strip()
         if cached and cer.exists():
-            print(f"   ✅ 复用已签发证书: {cached}")
-            return cached, cer, p12
+            certs = query_certs(token, uid)
+            hit = next((c for c in certs if str(c.get("id")) == cached), None)
+            if hit and _fp_match(hit):
+                print(f"   ✅ 复用已签发证书: {cached}")
+                return cached, cer, p12
+            if hit:
+                print(f"   ⚠️ 缓存证书 {cached} 与本地 p12 不配对"
+                      f"（云端 {cert_pubkey_fp(hit)[:16]}... vs 本地 {local_fp[:16] if local_fp else '?'}...），忽略缓存")
+            else:
+                print(f"   ⚠️ 缓存的 certId {cached} 云端不存在，忽略缓存")
 
-    # 2) 云端已有本工具签发的同名证书 -> 复用 id 并（重新）下载 .cer
+    # 2) 云端按公钥指纹匹配（跨机迁移：p12 还在、缓存丢失时自动找回对应证书）
     certs = query_certs(token, uid)
     for c in certs:
-        if c.get("certName") == my_name:
+        if _fp_match(c):
             url, _ = reapply_download_url(token, uid, c["certObjectId"])
             download(url, cer)
-            cert_id_file.write_text(c["id"])
-            print(f"   ✅ 复用云端证书 {c['id']} 并下载 .cer ({cer.stat().st_size} B)")
+            cert_id_file.write_text(str(c["id"]))
+            print(f"   ✅ 按指纹匹配到配对证书 {c['id']} ({c.get('certName','')})，重新下载 .cer")
             return str(c["id"]), cer, p12
 
-    # 3) 重新签发（新 CSR -> cert/add -> reapply 下载）
+    # 3) 清理不配对的本工具旧证书（占配额），然后签发新证书
+    _cleanup_stale(certs, "清理不配对旧证书")
     csr = work / "online-app.csr"
     gen_csr(p12, csr)
     print(f"   ⚙️ 上传 CSR 签发证书 {my_name} ...")
-    cert = issue_cert(token, uid, csr.read_text(), my_name)
+    try:
+        cert = issue_cert(token, uid, csr.read_text(), my_name)
+    except RuntimeError:
+        # 签发失败（通常是配额满）：再清一轮可删证书后重试一次
+        certs = query_certs(token, uid)
+        removable = [c for c in certs if c.get("allowDel", 1) and not _fp_match(c)]
+        ids = [str(c["id"]) for c in removable[:2]]
+        if not ids:
+            raise
+        print(f"   🧹 签发失败，清理可删证书 {ids} 后重试 ...")
+        r = delete_certs(token, uid, ids)
+        if r.get("ret", {}).get("code") != 0:
+            raise RuntimeError(
+                f"证书配额满且删除失败: {json.dumps(r, ensure_ascii=False)[:200]}。"
+                "可用 cert-delete 命令手动清理云端证书")
+        cert = issue_cert(token, uid, csr.read_text(), my_name)
     url, _ = reapply_download_url(token, uid, cert["certObjectId"])
     download(url, cer)
     cert_id_file.write_text(str(cert["id"]))

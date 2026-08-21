@@ -60,10 +60,13 @@ class _CBHandler(http.server.BaseHTTPRequestHandler):
     do_POST = _handle
 
 
-def _start_cb_server(port: int) -> list[http.server.HTTPServer]:
-    """双监听 127.0.0.1 与 ::1（兼容 localhost 解析差异）"""
+def _start_cb_server(port: int, bind: str = "0.0.0.0") -> list[http.server.HTTPServer]:
+    """监听回调端口。默认 0.0.0.0 + ::1 双栈（覆盖容器/QEMU 端口转发场景：
+    hostfwd 等转发目标为 guest IP 而非 127.0.0.1，仅回环监听会收不到回调）。"""
     servers = []
-    for host, cls in (("127.0.0.1", http.server.HTTPServer), ("::1", _V6HTTPServer)):
+    hosts = [("::1", _V6HTTPServer)] if bind == "::1" else \
+        [(bind, http.server.HTTPServer), ("::1", _V6HTTPServer)]
+    for host, cls in hosts:
         try:
             srv = cls((host, port), _CBHandler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -75,27 +78,26 @@ def _start_cb_server(port: int) -> list[http.server.HTTPServer]:
     return servers
 
 
-# ---------------------------------------------------------------- 主流程
 def generate_auth_url(port: int = 18487) -> str:
     """生成授权 URL（appid=1007 + 本地回调端口 + 一次性 code）"""
     code = uuid.uuid4().hex
     return f"{BASE}/console/DevEcoIDE/apply?port={port}&appid={APPID}&code={code}"
 
 
-def oauth_login(port: int = 18487, timeout: int = 300) -> str:
+def oauth_login(port: int = 18487, timeout: int = 300, bind: str = "0.0.0.0") -> str:
     """等待授权回调并兑换 oauth2Token。
 
     流程：打印授权 URL -> 等待浏览器回调（agent/用户操作）-> tempToken ->
           jwtToken -> oauth2Token。超时则抛错并提示。
     """
-    servers = _start_cb_server(port)
+    servers = _start_cb_server(port, bind)
     url = generate_auth_url(port)
-    print("=" * 64)
-    print("请完成华为账号授权（由 agent 或用户打开以下 URL）：")
-    print(f"  {url}")
-    print(f"  打开后：已登录则点击「允许」；未登录则先登录再允许。")
-    print(f"  回调端口 {port} 已就绪，等待授权回调（最多 {timeout}s）...")
-    print("=" * 64)
+    print("=" * 64, flush=True)
+    print("请完成华为账号授权（由 agent 或用户打开以下 URL）：", flush=True)
+    print(f"  {url}", flush=True)
+    print(f"  打开后：已登录则点击「允许」；未登录则先登录再允许。", flush=True)
+    print(f"  回调监听 {bind}:{port} 已就绪，等待授权回调（最多 {timeout}s）...", flush=True)
+    print("=" * 64, flush=True)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -120,7 +122,7 @@ def oauth_login(port: int = 18487, timeout: int = 300) -> str:
         for s in servers:
             s.shutdown()
         raise RuntimeError(f"jwtToken 获取失败: {jwt[:200]}")
-    print(f"== jwtToken 获取成功 (长度 {len(jwt)})")
+    print(f"== jwtToken 获取成功 (长度 {len(jwt)})", flush=True)
 
     # jwtToken -> accessToken
     resp = _http_get(f"{BASE}/authrouter/auth/api/jwToken/check",
@@ -136,8 +138,8 @@ def oauth_login(port: int = 18487, timeout: int = 300) -> str:
     (out / "oauth2token.txt").write_text(at)
     (out / "jwt.txt").write_text(jwt)
     (out / "uid.txt").write_text(ui.get("userId", ""))
-    print(f"✅ oauth2Token 已保存 -> {out / 'oauth2token.txt'} (长度 {len(at)})")
-    print(f"   userId: {ui.get('userId')} | realName: {ui.get('realName')}")
+    print(f"✅ oauth2Token 已保存 -> {out / 'oauth2token.txt'} (长度 {len(at)})", flush=True)
+    print(f"   userId: {ui.get('userId')} | realName: {ui.get('realName')}", flush=True)
     for s in servers:
         s.shutdown()
     return at

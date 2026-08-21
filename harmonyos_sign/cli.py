@@ -13,13 +13,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 from .core import (hdc, describe_toolchain, verify_app, oauth_dir)
 from .oauth import oauth_login
-from .online import (online_sign, query_certs, query_devices, ensure_cert)
+from .online import (online_sign, query_certs, query_devices, ensure_cert,
+                     delete_certs)
 
 
 def _cred() -> tuple[str, str]:
@@ -108,6 +110,21 @@ def cmd_certs(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cert_delete(a: argparse.Namespace) -> int:
+    """删除云端证书（清配额/清理不配对证书）。多个 id 用空格分隔"""
+    token, uid = _cred()
+    r = delete_certs(token, uid, a.ids)
+    if r.get("ret", {}).get("code") == 0:
+        print(f"✅ 已删除: {a.ids}")
+        cid = oauth_dir() / "work" / "cert-id.txt"
+        if cid.exists() and cid.read_text().strip() in a.ids:
+            cid.unlink()
+            print("   （已同步移除 work/cert-id.txt 缓存）")
+        return 0
+    print(f"❌ 删除失败: {json.dumps(r, ensure_ascii=False)[:300]}")
+    return 1
+
+
 def cmd_devices(a: argparse.Namespace) -> int:
     token, uid = _cred()
     for d in query_devices(token, uid):
@@ -142,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("certs", help="列出云端证书").set_defaults(fn=cmd_certs)
     sub.add_parser("devices", help="列出云端设备").set_defaults(fn=cmd_devices)
+
+    d = sub.add_parser("cert-delete", help="删除云端证书（清配额/清理不配对证书）")
+    d.add_argument("ids", nargs="+", help="证书 id（certs 命令可查，多个用空格分隔）")
+    d.set_defaults(fn=cmd_cert_delete)
 
     a = p.parse_args(argv)
     try:
