@@ -108,7 +108,7 @@ Profile: provision/add 创建响应直接返回 provisionFileUrl（OBS 预签名
 ## 5. 在线自动签名调用序列（python3 -m harmonyos_sign）
 ```bash
 # 1. 登录取 token
-python3 -m harmonyos_sign oauth-login          # -> ~/.ohos-oauth/oauth2token.txt
+python3 -m harmonyos_sign oauth-login          # -> $XDG_RUNTIME_DIR//tmp 的临时 token 目录
 # 2.（可选）预先确保证书材料；缺省时 online-sign 也会自动做
 python3 -m harmonyos_sign new-cert             # p12+CSR → cert/add → reapply下载.cer → cert-id.txt
 # 3. 签名+安装（certId/deviceId 可自动）

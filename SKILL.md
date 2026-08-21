@@ -40,8 +40,15 @@ hdc / ohpm / hvigor / hap-sign-tool.jar 按以下顺序**自动发现**（无需
    - macOS .app:         <DevEco-Studio.app>/Contents/sdk/default/openharmony/toolchains/hdc
 ```
 
-`check-env` 会打印实际发现路径。工作区：`~/.ohos-oauth/`（oauth2token.txt / uid.txt / work/：
-online-app.p12 / online-app.csr / cloud.cer / cert-id.txt / profile.p7b）
+`check-env` 会打印实际发现路径。
+
+**工作区（token 与材料分离）**：
+- 临时会话凭证（oauth2token/jwt/uid，1h 过期）→ `$XDG_RUNTIME_DIR`（或 /tmp）下
+  `ohos-sign-token-<uid>/`，随会话自动清理；环境变量 `OHOS_TOKEN` 可覆盖
+- 持久签名材料 → **项目根 `.ohos-sign/work/`**（自动向上查找含 `build-profile.json5`
+  的工程根；git 仓库自动把 `.ohos-sign/` 写入 `.gitignore`；非 git 项目留在当前工作目录）：
+  `online-app.p12`（私钥，0700）/ `online-app.csr` / `cloud.cer` / `cert-id.txt` / `profile.p7b`
+- 环境变量 `OHOS_OAUTH` 可把材料目录指向任意位置；旧版 `~/.ohos-oauth/` 材料自动迁移
 
 ## 工作流 A：环境检查
 
@@ -58,7 +65,7 @@ python3 -m harmonyos_sign fetch-udid         # 读取已连接真机 UDID
 hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
 
 # 2. 登录取 oauth2Token（浏览器授权由 agent 完成，见下节）
-python3 -m harmonyos_sign oauth-login       # -> ~/.ohos-oauth/oauth2token.txt
+python3 -m harmonyos_sign oauth-login       # -> token 目录（$XDG_RUNTIME_DIR 或 /tmp）
 
 # 3. 一键签名+安装：certId/deviceId 全部可省略（自动签发证书/匹配设备/注册设备）
 python3 -m harmonyos_sign online-sign entry-default-unsigned.hap com.example.pkg

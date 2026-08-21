@@ -23,10 +23,87 @@ from pathlib import Path
 KEYSTORE_PASS = "123456"
 
 
+def _git_ignore(dir_: Path) -> None:
+    """若 dir_ 位于 git 仓库内，把 .ohos-sign/ 追加到仓库根 .gitignore（防私钥误提交）"""
+    try:
+        root = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=10,
+                              cwd=str(dir_)).stdout.strip()
+        if not root:
+            return
+        rel = dir_.resolve().relative_to(Path(root).resolve())
+        pattern = rel.as_posix() + "/" if str(rel) != "." else ".ohos-sign/"
+        gi = Path(root) / ".gitignore"
+        existing = gi.read_text().splitlines() if gi.exists() else []
+        if pattern in existing or pattern.rstrip("/") in existing:
+            return
+        with open(gi, "a") as f:
+            if existing and not existing[-1].endswith(("\n", "\r")):
+                f.write("\n")
+            f.write(pattern + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _find_project_root(start: Path) -> Path:
+    """向上查找鸿蒙工程根（含 build-profile.json5）；找不到返回 start"""
+    for d in (start, *start.parents):
+        if (d / "build-profile.json5").exists():
+            return d
+    return start
+
+
 def oauth_dir() -> Path:
-    """在线签名工作区（~/.ohos-oauth）"""
-    p = Path(os.environ.get("OHOS_OAUTH", "~/.ohos-oauth")).expanduser()
-    p.mkdir(parents=True, exist_ok=True)
+    """持久签名材料目录：跟随鸿蒙项目，避免在家目录留下残余。
+    位置：最近工程根（含 build-profile.json5）或当前目录下的 `.ohos-sign/`；
+    git 仓库（rev-parse 命中）自动把 `.ohos-sign/` 写入 .gitignore。
+    环境变量 OHOS_OAUTH 显式覆盖。
+    旧版 ~/.ohos-oauth/work 材料自动迁移（一次性）。"""
+    override = os.environ.get("OHOS_OAUTH")
+    if override:
+        p = Path(override)
+    else:
+        p = _find_project_root(Path.cwd()) / ".ohos-sign"
+    p.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        p.chmod(0o700)
+    except OSError:
+        pass
+    if not override:
+        _git_ignore(p)
+    # 一次性迁移：旧 ~/.ohos-oauth/work -> .ohos-sign/work
+    try:
+        old = Path(os.environ.get("OHOS_OAUTH", "~/.ohos-oauth")).expanduser() / "work"
+        if old.exists() and not (p / "work").exists() and any(old.iterdir()):
+            shutil.move(str(old), str(p / "work"))
+    except Exception:  # noqa: BLE001
+        pass
+    return p
+
+
+def token_dir() -> Path:
+    """临时会话凭证目录（oauth2token/jwt/uid）：oauth2Token 约 1h 过期，属临时数据，
+    不落磁盘持久目录。优先 $XDG_RUNTIME_DIR（/run/user/<uid>，系统自动清理），
+    回退 /tmp；按 uid 区分，权限 0700。可用环境变量 OHOS_TOKEN 覆盖。"""
+    override = os.environ.get("OHOS_TOKEN")
+    if override:
+        p = Path(override)
+    else:
+        base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+        p = Path(base) / f"ohos-sign-token-{os.getuid()}"
+    p.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        p.chmod(0o700)
+    except OSError:
+        pass
+    # 一次性迁移：旧位置（~/.ohos-oauth）若仍有 token 且新位置没有，搬过去
+    for name in ("oauth2token.txt", "jwt.txt", "uid.txt"):
+        old = Path(os.environ.get("OHOS_OAUTH", "~/.ohos-oauth")).expanduser() / name
+        if old.exists() and not (p / name).exists() and not override:
+            try:
+                old.rename(p / name)
+            except OSError:
+                pass
     return p
 
 # ---------------------------------------------------------------- 候选目录

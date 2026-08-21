@@ -77,7 +77,9 @@ curl -sL https://raw.githubusercontent.com/yearsyan/harmonyos-sign-skill/main/in
 ## 安全说明
 
 - 涉及华为账号 OAuth 授权与签名证书，仅限个人开发者调试用途
-- oauth2Token 有效期约 1 小时，保存在 `~/.ohos-oauth/`（注意权限保护）
+- oauth2Token 有效期约 1 小时，属临时凭证，保存在 `$XDG_RUNTIME_DIR`/`/tmp` 的
+  `ohos-sign-token-<uid>/`（0700，系统自动清理），不落持久目录
+- 证书/私钥等持久材料跟随项目存放（工程根 `.ohos-sign/`，git 仓库自动写入 .gitignore）
 - 请勿提交私钥/证书/token 到仓库
 
 ## License

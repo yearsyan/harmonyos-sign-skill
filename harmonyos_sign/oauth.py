@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from .core import oauth_dir
+from .core import oauth_dir, token_dir
 
 BASE = "https://cn.devecostudio.huawei.com"
 APPID = 1007
@@ -134,7 +134,7 @@ def oauth_login(port: int = 18487, timeout: int = 300, bind: str = "0.0.0.0") ->
         for s in servers:
             s.shutdown()
         raise RuntimeError(f"accessToken 获取失败: {resp[:300]}")
-    out = oauth_dir()
+    out = token_dir()
     (out / "oauth2token.txt").write_text(at)
     (out / "jwt.txt").write_text(jwt)
     (out / "uid.txt").write_text(ui.get("userId", ""))

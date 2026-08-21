@@ -18,15 +18,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import (hdc, describe_toolchain, verify_app, oauth_dir)
+from .core import (hdc, describe_toolchain, verify_app, oauth_dir, token_dir)
 from .oauth import oauth_login
 from .online import (online_sign, query_certs, query_devices, ensure_cert,
                      delete_certs)
 
 
 def _cred() -> tuple[str, str]:
-    token = (oauth_dir() / "oauth2token.txt").read_text().strip()
-    uid = (oauth_dir() / "uid.txt").read_text().strip()
+    token = (token_dir() / "oauth2token.txt").read_text().strip()
+    uid = (token_dir() / "uid.txt").read_text().strip()
     if not token:
         raise RuntimeError("缺少 oauth2Token，先运行 oauth-login")
     return token, uid

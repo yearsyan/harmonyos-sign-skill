@@ -5,7 +5,8 @@ import json
 import time
 from pathlib import Path
 
-from .core import api_call, oauth_dir, run_java, KEYSTORE_PASS, hdc, subprocess, verify_app
+from .core import (api_call, oauth_dir, token_dir, run_java, KEYSTORE_PASS, hdc,
+                   subprocess, verify_app)
 
 CONNECT = "https://connect-api.cloud.huawei.com"
 OBS = None  # 由 provisionFileUrl 动态获取
@@ -359,8 +360,9 @@ def online_sign(hap_in: str, bundle: str, cert_id: str | None, device_id: str | 
     od = oauth_dir()
     work = od / "work"
     work.mkdir(parents=True, exist_ok=True)
-    token = (od / "oauth2token.txt").read_text().strip()
-    uid = (od / "uid.txt").read_text().strip()
+    td = token_dir()
+    token = (td / "oauth2token.txt").read_text().strip()
+    uid = (td / "uid.txt").read_text().strip()
     if not token:
         raise RuntimeError("缺少 oauth2Token，先运行 oauth-login")
 
