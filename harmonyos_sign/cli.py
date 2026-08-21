@@ -4,25 +4,34 @@
   python3 -m harmonyos_sign check-env
   python3 -m harmonyos_sign fetch-udid
   python3 -m harmonyos_sign oauth-login [--timeout 300]  # 生成授权URL等待回调，浏览器操作由agent完成
-  python3 -m harmonyos_sign online-sign <unsigned.hap> <bundleName> <certId> <deviceId> [--cert cert.cer] [--p12 key.p12]
+  python3 -m harmonyos_sign new-cert                      # 生成p12+CSR→云端签发证书→下载.cer（幂等，已有则复用）
+  python3 -m harmonyos_sign online-sign <unsigned.hap> <bundleName> [certId] [deviceId]
+                                                          # certId/deviceId 可省略：自动签发/匹配/注册
   python3 -m harmonyos_sign certs | devices
   python3 -m harmonyos_sign verify <signed.hap>
 """
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
 
-from .core import (hdc, find_hdc, find_ohpm, find_hvigorw,
-                   describe_toolchain, verify_app)
+from .core import (hdc, describe_toolchain, verify_app, oauth_dir)
 from .oauth import oauth_login
-from .online import online_sign, query_certs, query_devices
+from .online import (online_sign, query_certs, query_devices, ensure_cert)
+
+
+def _cred() -> tuple[str, str]:
+    token = (oauth_dir() / "oauth2token.txt").read_text().strip()
+    uid = (oauth_dir() / "uid.txt").read_text().strip()
+    if not token:
+        raise RuntimeError("缺少 oauth2Token，先运行 oauth-login")
+    return token, uid
 
 
 def cmd_check_env(_: argparse.Namespace) -> int:
+    from .core import find_hdc, find_ohpm, find_hvigorw
     ok = fail = 0
     def chk(name, cond, hint=""):
         nonlocal ok, fail
@@ -60,9 +69,20 @@ def cmd_oauth(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_new_cert(_: argparse.Namespace) -> int:
+    """确保证书材料就绪（幂等）：p12/CSR/云端证书/cloud.cer/cert-id.txt"""
+    token, uid = _cred()
+    cert_id, cer, p12 = ensure_cert(token, uid, None, None, None)
+    print(f"\n证书材料就绪:")
+    print(f"  certId : {cert_id}")
+    print(f"  证书链 : {cer}")
+    print(f"  私钥库 : {p12}（密码 123456, alias online-app）")
+    print(f"  缓存   : {oauth_dir()/'work'/'cert-id.txt'}")
+    return 0
+
+
 def cmd_online(a: argparse.Namespace) -> int:
-    out = online_sign(a.hap, a.bundle, a.cert_id, a.device_id, a.cert, a.p12, a.alias)
-    print(f"✅ 安装完成: {out}")
+    online_sign(a.hap, a.bundle, a.cert_id, a.device_id, a.cert, a.p12, a.alias)
     return 0
 
 
@@ -71,18 +91,25 @@ def cmd_verify(a: argparse.Namespace) -> int:
 
 
 def cmd_certs(a: argparse.Namespace) -> int:
-    from .core import oauth_dir
-    token = (oauth_dir() / "oauth2token.txt").read_text().strip()
-    uid = (oauth_dir() / "uid.txt").read_text().strip()
+    token, uid = _cred()
+    cached = ""
+    cid_file = oauth_dir() / "work" / "cert-id.txt"
+    if cid_file.exists():
+        cached = cid_file.read_text().strip()
+    my_name = f"cli_debug_{uid}.cer"
     for c in query_certs(token, uid):
-        print(f"{c['id']}  {c['certName']}  {c.get('sha256','')[:16]}  expire={c.get('expireTime')}")
+        mark = ""
+        if str(c["id"]) == cached:
+            mark = "  <- 本工具材料(work/cert-id.txt)"
+        elif c.get("certName") == my_name:
+            mark = "  <- 本工具同名证书"
+        print(f"{c['id']}  {c['certName']}  {c.get('sha256','')[:16]}  expire={c.get('expireTime')}{mark}")
+    print("\n提示: 本工具签发的证书无需记 id，online-sign 会自动复用（work/cert-id.txt）")
     return 0
 
 
 def cmd_devices(a: argparse.Namespace) -> int:
-    from .core import oauth_dir
-    token = (oauth_dir() / "oauth2token.txt").read_text().strip()
-    uid = (oauth_dir() / "uid.txt").read_text().strip()
+    token, uid = _cred()
     for d in query_devices(token, uid):
         print(f"{d['id']}  {d['deviceName']}  {d['udid'][:16]}...  type={d['deviceType']}")
     return 0
@@ -103,9 +130,13 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--port", type=int, default=18487, help="本地回调端口")
     o.set_defaults(fn=cmd_oauth)
 
-    o = sub.add_parser("online-sign", help="在线签名 + 安装（HarmonyOS）")
+    sub.add_parser("new-cert", help="签发/复用云端调试证书（生成p12+CSR→cert/add→下载.cer）"
+                   ).set_defaults(fn=cmd_new_cert)
+
+    o = sub.add_parser("online-sign", help="在线签名 + 安装（certId/deviceId 可省略自动处理）")
     o.add_argument("hap"); o.add_argument("bundle")
-    o.add_argument("cert_id"); o.add_argument("device_id")
+    o.add_argument("cert_id", nargs="?", help="可选：云端证书 id（省略则自动签发/复用）")
+    o.add_argument("device_id", nargs="?", help="可选：云端设备 id（省略则按 UDID 匹配/注册）")
     o.add_argument("--cert", help="云证书链 .cer"); o.add_argument("--p12", help="本地私钥库")
     o.add_argument("--alias", default="online-app"); o.set_defaults(fn=cmd_online)
 

@@ -16,8 +16,9 @@ HarmonyOS 应用签名与真机安装工具链（Python，零第三方依赖）�
 | `check-env` | 工具链自动发现 + 环境检查 |
 | `fetch-udid` | 读取已连接真机 UDID |
 | `oauth-login` | 生成授权 URL，等待回调并兑换 oauth2Token（默认 5min 超时） |
-| `online-sign` | 云端创建调试 Profile + 本地签名 + hdc 安装 |
-| `certs` / `devices` | 查询云端证书 / 已注册设备 |
+| `new-cert` | 签发/复用云端调试证书：本地 p12+CSR → `cert/add` 签发 → 下载 .cer（幂等） |
+| `online-sign` | 一键签名+安装：证书自动签发/复用、设备自动匹配/注册、创建 Profile、本地签名、hdc 安装（certId/deviceId 可省略） |
+| `certs` / `devices` | 查询云端证书（标记本工具材料）/ 已注册设备 |
 | `verify` | 验证 HAP 签名 |
 
 ## 安装
@@ -52,13 +53,13 @@ curl -sL https://raw.githubusercontent.com/yearsyan/harmonyos-sign-skill/main/in
 ```
 浏览器授权（agent 工具）        Python 脚本（harmonyos_sign）
 ┌─────────────────────┐      ┌──────────────────────────────────┐
-│ 打开授权 URL         │ ───▶ │ oauth-login: 生成 URL + 等待回调  │
+│ 打开授权 URL         │ ──▶ │ oauth-login: 生成 URL + 等待回调  │
 │ 检查登录→点击允许    │      │  tempToken → jwtToken → oauth2Token│
 └─────────────────────┘      └──────────────┬───────────────────┘
                                             ▼
                             connect-api.cloud.huawei.com（oauth2Token 认证）
-                            创建调试 Profile（ide/test/provision/add）
-                            查询证书 / 注册设备
+                            cert/add 签发证书 + reapply 下载 .cer
+                            device/add 注册设备 + 创建调试 Profile
                                             ▼
                             hap-sign-tool.jar 本地签名（SHA-384/ECDSA）
                             hdc install → aa start
