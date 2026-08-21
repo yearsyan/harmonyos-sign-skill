@@ -1,4 +1,4 @@
-# harmonyos-sign
+# harmonyos-sign-skill
 
 HarmonyOS 应用签名与真机安装工具链（Python，零第三方依赖）。
 
