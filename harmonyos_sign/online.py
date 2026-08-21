@@ -24,8 +24,8 @@ def _headers(token: str, uid: str) -> dict:
     return {"oauth2Token": token, "uid": uid, "teamId": uid}
 
 
-def _connect_api(path: str, body: dict, token: str, uid: str) -> dict:
-    return api_call(CONNECT + path, body, headers=_headers(token, uid))
+def _connect_api(path: str, body: dict, token: str, uid: str, method: str = "POST") -> dict:
+    return api_call(CONNECT + path, body, headers=_headers(token, uid), method=method)
 
 
 def _connect_get(path: str, query: dict, token: str, uid: str) -> dict:
@@ -56,36 +56,58 @@ def p12_public_key_sha256(p12: Path, alias: str = "online-app",
                           pwd: str = KEYSTORE_PASS) -> str:
     """计算本地 p12 公钥指纹，与云端 cert/list.publicKeySha256 同口径：
     SHA256(base64(SPKI 中裸公钥点)) 的小写 hex。失败返回空串。
+    优先用 openssl pkcs12 提取证书（无需 JDK keytool），失败时降级 keytool。
     用于校验本地 p12 与云端证书是否同一密钥对（换 p12/跨机迁移时避免签名报 keyAlias）。
     """
     import base64
     import hashlib
-    try:
-        kt = subprocess.run(["keytool", "-exportcert", "-keystore", str(p12),
-                             "-alias", alias, "-storepass", pwd, "-rfc"],
-                            capture_output=True, text=True, timeout=30)
-        if kt.returncode != 0:
-            return ""
+
+    def _from_pem(pem: str) -> str:
         pub = subprocess.run(["openssl", "x509", "-pubkey", "-noout"],
-                             input=kt.stdout, capture_output=True, text=True, timeout=30)
+                             input=pem, capture_output=True, text=True, timeout=30)
         if pub.returncode != 0:
             return ""
         der = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"],
-                             input=pub.stdout, capture_output=True, timeout=30)
+                             input=pub.stdout.encode(), capture_output=True, timeout=30)
         if der.returncode != 0:
             return ""
         # 剥 SPKI BIT STRING，取裸公钥点（去掉 unused-bits 计数字节）
-        i = der.stdout.index(b"\x03")
-        j = der.stdout[i + 1]
-        if j & 0x80:
-            n = j & 0x7f
-            j = int.from_bytes(der.stdout[i + 2:i + 2 + n], "big")
-            point = der.stdout[i + 2 + n:i + 2 + n + j]
-        else:
-            point = der.stdout[i + 2:i + 2 + j]
-        return hashlib.sha256(base64.b64encode(point[1:])).hexdigest()
+        try:
+            i = der.stdout.index(b"\x03")
+            j = der.stdout[i + 1]
+            if j & 0x80:
+                n = j & 0x7f
+                j = int.from_bytes(der.stdout[i + 2:i + 2 + n], "big")
+                point = der.stdout[i + 2 + n:i + 2 + n + j]
+            else:
+                point = der.stdout[i + 2:i + 2 + j]
+            return hashlib.sha256(base64.b64encode(point[1:])).hexdigest()
+        except Exception:  # noqa: BLE001
+            return ""
+
+    try:
+        # 1) openssl 直接读 p12（不依赖 JDK）：clcerts 导出证书链，取叶证书
+        r = subprocess.run(["openssl", "pkcs12", "-in", str(p12),
+                            "-passin", f"pass:{pwd}", "-clcerts", "-nokeys"],
+                           capture_output=True, text=True, timeout=30)
+        pem = r.stdout
+        if r.returncode == 0 and "BEGIN CERTIFICATE" in pem:
+            # 取最后一张（叶）证书，避免 openssl 输出头信息干扰
+            certs = [c + "-----END CERTIFICATE-----\n"
+                     for c in pem.split("-----END CERTIFICATE-----") if "BEGIN CERTIFICATE" in c]
+            if certs:
+                fp = _from_pem(certs[-1])
+                if fp:
+                    return fp
+        # 2) 降级 keytool（JRE 无 keytool 时跳过）
+        kt = subprocess.run(["keytool", "-exportcert", "-keystore", str(p12),
+                             "-alias", alias, "-storepass", pwd, "-rfc"],
+                            capture_output=True, text=True, timeout=30)
+        if kt.returncode == 0 and "BEGIN CERTIFICATE" in kt.stdout:
+            return _from_pem(kt.stdout)
     except Exception:  # noqa: BLE001
-        return ""
+        pass
+    return ""
 
 
 def query_devices(token: str, uid: str) -> list[dict]:
