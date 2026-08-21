@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harmonyos-sign"
+version = "1.0.0"
+description = "HarmonyOS HAP online signing toolkit: OAuth login simulation, cloud cert/profile issuance, local signing and device install"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[project.scripts]
+harmonyos-sign = "harmonyos_sign.cli:main"
+
+[tool.setuptools]
+packages = ["harmonyos_sign"]

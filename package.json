@@ -1,0 +1,11 @@
+{
+  "name": "harmonyos-sign",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HarmonyOS HAP online signing toolkit: OAuth login simulation, cloud cert/profile issuance, local signing and device install",
+  "keywords": ["pi-package", "harmonyos", "hdc", "hap", "signing", "deveco"],
+  "license": "MIT",
+  "pi": {
+    "skills": ["./"]
+  }
+}
