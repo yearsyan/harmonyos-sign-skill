@@ -56,6 +56,31 @@ pip install -e . --user
 
 > 不建议裸 `pip install -e .`（会写入当前 Python 环境的全局 site-packages）。
 
+### 方式 4：安装到其他 Agent 工具（Claude Code / Codex / Kimi Code / ZCode）
+
+本项目遵循 [Agent Skills 标准](https://agentskills.io/specification)（SKILL.md + frontmatter），
+各工具安装方式 = 把仓库 clone 到其 skills 目录：
+
+| 工具 | skills 目录 | 手动安装命令 |
+|------|------------|-------------|
+| Claude Code | `~/.claude/skills/` | `git clone <repo> ~/.claude/skills/harmonyos-signing` |
+| Codex CLI | `~/.codex/skills/` | `git clone <repo> ~/.codex/skills/harmonyos-signing` |
+| Kimi Code | `$KIMI_CODE_HOME/skills/`（默认 `~/.kimi-code/skills/`） | `git clone <repo> ~/.kimi-code/skills/harmonyos-signing` |
+| ZCode | `~/.zcode/skills/` | `git clone <repo> ~/.zcode/skills/harmonyos-signing` |
+| pi | `~/.pi/agent/skills/` | `pi install git:github.com/yearsyan/harmonyos-sign-skill` |
+
+**一键安装**（自动检测已安装的工具并逐个安装/更新）：
+
+```bash
+git clone git@github.com:yearsyan/harmonyos-sign-skill.git
+cd harmonyos-sign-skill && ./install.sh
+# 指定仓库地址: ./install.sh https://github.com/yearsyan/harmonyos-sign-skill.git
+# 离线/无 key:   ./install.sh --local   （从当前目录复制）
+```
+
+> 提示：ZCode 安装后需在 Settings -> Skills 点击 Refresh；各工具重启会话后
+> 通过 `/skill:harmonyos-signing` 调用。
+
 ## 快速开始
 
 ```bash
