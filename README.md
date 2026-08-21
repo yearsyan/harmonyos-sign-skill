@@ -69,13 +69,15 @@ pip install -e . --user
 | ZCode | `~/.zcode/skills/` | `git clone <repo> ~/.zcode/skills/harmonyos-signing` |
 | pi | `~/.pi/agent/skills/` | `pi install git:github.com/yearsyan/harmonyos-sign-skill` |
 
-**一键安装**（自动检测已安装的工具并逐个安装/更新）：
+**一键安装**（公开仓库，无需 git，自动检测已安装的工具并逐个安装/更新）：
 
 ```bash
-git clone git@github.com:yearsyan/harmonyos-sign-skill.git
-cd harmonyos-sign-skill && ./install.sh
-# 指定仓库地址: ./install.sh https://github.com/yearsyan/harmonyos-sign-skill.git
-# 离线/无 key:   ./install.sh --local   （从当前目录复制）
+# 推荐：远程安装（curl 管道，无需 clone）
+curl -sL https://raw.githubusercontent.com/yearsyan/harmonyos-sign-skill/main/install.sh | bash
+
+# 或 clone 后本地执行
+#   ./install.sh <git-url>   指定仓库
+#   ./install.sh --local     离线（从当前目录复制）
 ```
 
 > 提示：ZCode 安装后需在 Settings -> Skills 点击 Refresh；各工具重启会话后
